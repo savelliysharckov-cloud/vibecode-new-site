@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HELLO / GOODBYE</title>
 <style>
-  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; cursor: pointer; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+  body.game { cursor: crosshair; }
   canvas { display: block; width: 100vw; height: 100vh; }
 
   /* Shown only if WebGL2 is unavailable: a plain crossfade on the same 6s loop. */
@@ -23,6 +24,14 @@
     transition: opacity 0.4s;
   }
   .hint.off { opacity: 0; }
+  .stars {
+    position: fixed; left: 0; right: 0; top: 24px; text-align: center; pointer-events: none;
+    font: 30px/1 Helvetica, Arial, sans-serif; letter-spacing: 0.3em; text-indent: 0.3em; transition: opacity 0.5s;
+  }
+  .stars.off { opacity: 0; }
+  .stars span { color: #451438; transition: color 0.3s, text-shadow 0.3s; }
+  .stars span.on { color: #c2d04a; text-shadow: 0 0 14px #b85c30; }
+  .no-gl .stars { display: none; }
   .no-gl .hint { display: none; }
   .no-gl canvas { display: none; }
   .no-gl .fallback { display: block; }
@@ -30,11 +39,12 @@
 </head>
 <body>
 <canvas id="c" role="img" aria-label="HELLO growing into GOODBYE and back"></canvas>
+<div class="stars off" id="stars" aria-label="Stars caught"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div>
 <div class="hint off" id="hint">click for sound</div>
 <div class="fallback" aria-hidden="true"><span>HELLO</span><span>GOODBYE</span></div>
 <script>
 (() => {
-  const WORDS = ['HELLO', 'GOODBYE'];
+  const WORDS = ['HELLO', 'GOODBYE', 'YOU WIN!'];
   const CYCLE = 3;             // seconds: HELLO -> GOODBYE -> HELLO (two bars of the break)
   const REST = 0.28;           // how much it keeps flowing even when a word is fully formed (0 = freezes)
   const ZOOM_CYCLES = 8;       // word cycles it takes to grow from normal size to its largest
@@ -105,7 +115,7 @@
   sx.font = fontOf(100); spaced(100);
   const EM = Math.floor(100 * (TW * 0.7) / Math.max(...WORDS.map((w) => sx.measureText(w).width)));
 
-  const field = new Float32Array(TW * TH * 2);   // R = HELLO, G = GOODBYE, in em units
+  const field = new Float32Array(TW * TH * 3);   // R = HELLO, G = GOODBYE, B = YOU WIN!, in em units
   WORDS.forEach((word, ch) => {
     sx.clearRect(0, 0, TW, TH);
     sx.font = fontOf(EM); spaced(EM);
@@ -119,7 +129,7 @@
       inner[i] = a === 1 ? INF : a === 0 ? 0 : Math.max(0, a - 0.5) ** 2;
     }
     edt(outer, TW, TH); edt(inner, TW, TH);
-    for (let i = 0; i < TW * TH; i++) field[i * 2 + ch] = (outer[i] - inner[i]) / EM;
+    for (let i = 0; i < TW * TH; i++) field[i * 3 + ch] = (outer[i] - inner[i]) / EM;
   });
 
   // ---- GL ----
@@ -131,7 +141,8 @@
   uniform sampler2D uField;
   uniform vec2 uRes, uTex;   // canvas size (px); texture size / em size
   uniform vec2 uFs, uW;       // font size (px) and weight of the two overlapping zoom layers
-  uniform float uT, uE, uG, uCalm, uFlash, uSeed;
+  uniform vec3 uHole;         // the hole: centre (px) and radius (px, 0 = none)
+  uniform float uT, uE, uG, uCalm, uFlash, uSeed, uSuck, uWin;
   out vec4 o;
 
   float hash(vec2 p) {
@@ -172,7 +183,14 @@
   }
 
   vec4 shade(float fs) {
-    vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / fs;    // em units, origin at centre
+    // Going down the hole: everything spirals around it, tighter and smaller, until it is a point.
+    vec2 v = gl_FragCoord.xy - mix(0.5 * uRes, uHole.xy, uSuck);
+    if (uSuck > 0.0) {
+      float a = uSuck * uSuck * 7.0 / (0.3 + 2.0 * length(v) / uRes.y);
+      v = vec2(cos(a) * v.x - sin(a) * v.y, sin(a) * v.x + cos(a) * v.y);
+      fs *= max(pow(1.0 - uSuck, 2.5), 1e-3);
+    }
+    vec2 p = v / fs;                                 // em units, origin at centre
     p.y = -p.y;
 
     // The surface breathes and flows: a swirl folded into itself, strongest mid-change.
@@ -182,14 +200,14 @@
     vec2 q = p * (1.0 - 0.03 * uG * sin(uT * 1.3) * (1.0 - uCalm)) + (w1 + w2 * 0.6) * amp;
 
     vec2 uv = 0.5 + q / uTex;
-    vec2 d2 = texture(uField, uv).rg;
+    vec3 d3 = texture(uField, uv).rgb;
 
     // Each region ripens at its own moment, so one word grows out of the other in patches.
     float n = soft(p * 1.1 + w1 * 1.5 + uT * 0.05);
     float k = 0.55 * (1.0 - uCalm);
     float m = smoothstep(n * k, n * k + 1.0, uE * (1.0 + k));
 
-    float d = mix(d2.x, d2.y, m);
+    float d = mix(mix(d3.x, d3.y, m), d3.z, uWin);
     d -= uG * 0.05;                                              // keep its body while in between
     d += uG * 0.10 * (soft(q * 2.2 + uT * 0.3) - 0.5) * (1.0 - uCalm);   // buds and hollows
 
@@ -206,7 +224,8 @@
   }
 
   void main() {
-    vec4 c = shade(uFs.x) * uW.x;
+    vec4 c = vec4(0.0);
+    if (uW.x > 0.0) c += shade(uFs.x) * uW.x;
     if (uW.y > 0.0) c += shade(uFs.y) * uW.y;   // the next run, already emerging in the distance
 
     // Lightning behind the letters: bolts and a dull glow in the cloud, hidden where a letter covers them.
@@ -218,7 +237,18 @@
       bg = (vec3(0.80, 0.86, 0.36) * min(b, 1.4) + vec3(0.62, 0.20, 0.13) * cloud * cloud * 1.2
             + vec3(0.42, 0.12, 0.33) * 0.12) * uFlash;
     }
-    o = vec4(c.rgb + bg * (1.0 - clamp(c.a, 0.0, 1.0)), 1.0);
+    vec3 col = c.rgb + bg * (1.0 - clamp(c.a, 0.0, 1.0));
+
+    // The hole the word went down: a small white disc with a spiral halo.
+    if (uHole.z > 0.0) {
+      vec2 hv = gl_FragCoord.xy - uHole.xy;
+      float hd = length(hv) / uHole.z;                           // distance in radii
+      float arm = 0.5 + 0.5 * sin(hd * 2.2 - uT * 7.0 + atan(hv.y, hv.x) * 2.0);
+      vec3 halo = palette(hd * 0.12 - uT * 0.2) * arm * exp(-max(hd - 1.0, 0.0) * 0.55) * 1.5;
+      float e = 1.5 / uHole.z;
+      col = mix(col + halo, vec3(1.0), smoothstep(1.0 + e, 1.0 - e, hd));
+    }
+    o = vec4(col, 1.0);
   }`;
 
   function shader(type, src) {
@@ -241,7 +271,7 @@
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 
   gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, TW, TH, 0, gl.RG, gl.FLOAT, field);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB16F, TW, TH, 0, gl.RGB, gl.FLOAT, field);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -249,14 +279,14 @@
 
   const U = (name) => gl.getUniformLocation(prog, name);
   const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG'), uW = U('uW');
-  const uFlash = U('uFlash'), uSeed = U('uSeed');
+  const uFlash = U('uFlash'), uSeed = U('uSeed'), uHole = U('uHole'), uSuck = U('uSuck'), uWin = U('uWin');
   gl.uniform1i(U('uField'), 0);
   gl.uniform1f(U('uCalm'), calm ? 1 : 0);
   gl.uniform2f(uTex, TW / EM, TH / EM);
 
-  let fsStart = 0, fsEnd = 0;   // font size in device px: where the zoom begins and where it ends
+  let fsStart = 0, fsEnd = 0, dpr = 1;   // font size in device px: where the zoom begins and where it ends
   function resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(innerWidth * dpr);
     canvas.height = Math.round(innerHeight * dpr);
     gl.viewport(0, 0, canvas.width, canvas.height);
@@ -266,53 +296,175 @@
     fsEnd = Math.max(fsStart * 2.2, 0.7 * Math.min(innerHeight, innerWidth * 1.5) * dpr);
   }
 
-  function frame(now) {
-    const s = now / 1000;
+  // ---- the game ----
+  // The word grows RUNS times, then goes down a hole. Chase the hole; five catches win.
+  // Add ?runs=1 to the address to reach the game sooner.
+  const RUNS = (() => {
+    const n = parseInt(new URLSearchParams(location.search).get('runs'), 10);
+    return n >= 0 && n <= 20 ? n : 3;
+  })();
+  const T_SUCK = RUNS * TOTAL;   // when the word starts going down the hole
+  const SUCK = 1.8;              // seconds that takes
+  const STARS = 5;
+  const HOLE_R = 11;             // css px
+  const INTRO = 0, SUCKING = 1, GAME = 2, WIN = 3;
+
+  let t0 = performance.now() / 1000;                 // start of the current round
+  const clock = () => Math.max(0, performance.now() / 1000 - t0);
+  let phase = INTRO, stars = 0, tWin = 0, tCatch = -10, tSpawn = 0, lastS = 0;
+  const hole = { x: 0, y: 0, vx: 0, vy: 0 };
+  const mouse = { x: 0, y: 0, seen: false, touch: false };
+  const starsEl = document.getElementById('stars'), hint = document.getElementById('hint');
+  window.helloGame = { hole, get phase() { return phase; }, get stars() { return stars; } };
+
+  function setPhase(next) {
+    phase = next;
+    document.body.classList.toggle('game', phase === GAME);
+    starsEl.classList.toggle('off', phase < GAME);
+  }
+  function showStars() { [...starsEl.children].forEach((el, i) => el.classList.toggle('on', i < stars)); }
+  function restart() {
+    t0 = performance.now() / 1000; lastS = 0; nextStep = 0;
+    stars = 0; tCatch = -10; showStars(); setPhase(INTRO);
+  }
+
+  function spawnHole(s) {
+    // Somewhere on screen, away from the pointer.
+    const W = innerWidth, H = innerHeight;
+    for (let i = 0; i < 30; i++) {
+      hole.x = 80 + Math.random() * Math.max(1, W - 160);
+      hole.y = 90 + Math.random() * Math.max(1, H - 180);
+      if (!mouse.seen || Math.hypot(hole.x - mouse.x, hole.y - mouse.y) > Math.min(W, H) * 0.45) break;
+    }
+    hole.vx = hole.vy = 0; tSpawn = s;
+  }
+  function caught(s) {
+    stars++; tCatch = s; showStars(); ding(stars);
+    if (stars >= STARS) { tWin = s; setPhase(WIN); fanfare(); }
+    else spawnHole(s);
+  }
+  function moveHole(dt, s) {
+    const W = innerWidth, H = innerHeight;
+    const vmax = 480 + 70 * stars;                   // a little quicker after every catch
+    let ax = 0, ay = 0;
+    const dx = hole.x - mouse.x, dy = hole.y - mouse.y, dist = Math.hypot(dx, dy) || 1;
+    if (mouse.seen && dist < 260) {                  // it runs from the pointer...
+      const f = 3400 * (1 - 0.6 * dist / 260);
+      ax += dx / dist * f; ay += dy / dist * f;
+    }
+    ax += Math.cos(s * 1.3 + 1.7 * Math.sin(s * 0.7)) * 140;   // ...and drifts about when left alone
+    ay += Math.sin(s * 1.1 + 2.1 * Math.cos(s * 0.5)) * 140;
+    const m = 90, k = 26;                            // edges push back softly, so it can be cornered
+    if (hole.x < m) ax += (m - hole.x) * k;
+    if (hole.x > W - m) ax -= (hole.x - (W - m)) * k;
+    if (hole.y < m) ay += (m - hole.y) * k;
+    if (hole.y > H - m) ay -= (hole.y - (H - m)) * k;
+
+    const damp = Math.exp(-2.5 * dt);
+    hole.vx = (hole.vx + ax * dt) * damp; hole.vy = (hole.vy + ay * dt) * damp;
+    const sp = Math.hypot(hole.vx, hole.vy);
+    if (sp > vmax) { hole.vx *= vmax / sp; hole.vy *= vmax / sp; }   // slower than a decisive hand
+    hole.x = Math.min(W - 14, Math.max(14, hole.x + hole.vx * dt));
+    hole.y = Math.min(H - 14, Math.max(14, hole.y + hole.vy * dt));
+
+    const reach = mouse.touch ? 46 : 30;
+    if (mouse.seen && s - tSpawn > 0.9 && Math.hypot(hole.x - mouse.x, hole.y - mouse.y) < reach) caught(s);
+  }
+
+  // Lightning struck by the kicks and accented snares of the break: [brightness, shape seed].
+  function strike(s) {
+    const n = Math.floor(s / STEP);
+    for (let j = 0; j < 8 && n - j >= 0; j++) {
+      const bar = barOf(n - j), i = (n - j) % 16;
+      const w = bar.s[i] === 'X' ? 1 : bar.k[i] === 'x' ? 0.55 : 0;
+      if (!w) continue;
+      const dt = s - (n - j) * STEP;                   // a strike, then a weaker second flicker
+      return [w * (Math.exp(-dt * 9) + (dt > 0.07 ? 0.6 * Math.exp(-(dt - 0.07) * 14) : 0)), ((n - j) % 97) * 1.37];
+    }
+    return [0, 0];
+  }
+
+  let hintText = '';
+  function showHint(s) {
+    const soundOff = !ac || ac.state !== 'running';
+    const text = phase === WIN && s > tWin + 2 ? 'click to play again'
+      : phase === GAME && stars === 0 && s > tSpawn + 1 ? 'catch it'
+      : soundOff ? 'click for sound' : '';
+    if (text === hintText) return;
+    hintText = text;
+    if (text) hint.textContent = text;
+    hint.classList.toggle('off', !text);
+  }
+
+  function frame() {
+    const s = clock(), dt = Math.min(0.05, Math.max(0, s - lastS));
+    lastS = s;
+
+    if (phase === INTRO && s >= T_SUCK) {
+      hole.x = innerWidth / 2; hole.y = innerHeight / 2;
+      setPhase(SUCKING); whoosh();
+    }
+    if (phase === SUCKING && s >= T_SUCK + SUCK) { setPhase(GAME); spawnHoleAtCentre(s); }
+    if (phase === GAME) moveHole(dt, s);
+
     // No holds: progress swings HELLO -> GOODBYE -> HELLO as one continuous wave.
     const p = 0.5 - 0.5 * Math.cos(2 * Math.PI * s / CYCLE);
-
-    // Endless approach: the word keeps coming closer; as it reaches its largest it dissolves
-    // while the next run is already growing out of the centre, so there is no cut.
-    const total = TOTAL, z = s % total, ratio = fsEnd / fsStart;
-    let fsB = 0, wB = 0;
-    if (!calm && z > total - OVERLAP) {
-      const x = (z - (total - OVERLAP)) / OVERLAP;
-      wB = x * x * (3 - 2 * x);
-      fsB = fsStart * Math.pow(ratio, (z - total) / total);
-    }
-    gl.uniform2f(uFs, calm ? fsStart : fsStart * Math.pow(ratio, z / total), fsB);
-    gl.uniform2f(uW, 1 - wB, wB);
-
     gl.uniform1f(uT, s);
     gl.uniform1f(uE, p);                                         // the shader eases it per region
     gl.uniform1f(uG, REST + (1 - REST) * Math.sin(Math.PI * p)); // flow strength; never drops to zero
 
-    // Lightning in the last cycles, struck by the kicks and accented snares of the break.
-    let flash = 0, seed = 0;
-    const stormStart = total - STORM_CYCLES * CYCLE;
-    if (!calm && z > stormStart) {
-      const n = Math.floor(s / STEP);
-      for (let j = 0; j < 8; j++) {
-        const bar = barOf(n - j), i = (((n - j) % 16) + 16) % 16;
-        const w = bar.s[i] === 'X' ? 1 : bar.k[i] === 'x' ? 0.55 : 0;
-        if (!w) continue;
-        const dt = s - (n - j) * STEP;                 // a strike, then a weaker second flicker
-        flash = w * (Math.exp(-dt * 9) + (dt > 0.07 ? 0.6 * Math.exp(-(dt - 0.07) * 14) : 0));
-        seed = ((n - j) % 97) * 1.37;
-        break;
-      }
-      flash *= Math.min(1, (z - stormStart) / 1.5);
-    }
-    gl.uniform1f(uFlash, flash);
-    gl.uniform1f(uSeed, seed);
+    let fsA = 1, fsB = 1, wA = 0, wB = 0, suck = 0, win = 0, holeR = 0, flash = 0, seed = 0;
+    const ratio = fsEnd / fsStart;
 
+    if (phase === INTRO) {
+      // Endless approach: the word keeps coming closer; as it reaches its largest it dissolves
+      // while the next run is already growing out of the centre, so there is no cut.
+      const z = s % TOTAL;
+      fsA = calm ? fsStart : fsStart * Math.pow(ratio, z / TOTAL); wA = 1;
+      if (!calm && z > TOTAL - OVERLAP && s < T_SUCK - OVERLAP) {   // the last run is swallowed instead
+        const x = (z - (TOTAL - OVERLAP)) / OVERLAP;
+        wB = x * x * (3 - 2 * x); wA = 1 - wB;
+        fsB = fsStart * Math.pow(ratio, (z - TOTAL) / TOTAL);
+      }
+      const stormStart = TOTAL - STORM_CYCLES * CYCLE;           // lightning in the last cycles
+      if (!calm && z > stormStart) {
+        [flash, seed] = strike(s);
+        flash *= Math.min(1, (z - stormStart) / 1.5);
+      }
+    } else if (phase === SUCKING) {
+      const x = (s - T_SUCK) / SUCK;
+      fsA = calm ? fsStart : fsEnd; wA = 1;
+      suck = Math.pow(x, 1.6);
+      holeR = HOLE_R * Math.min(1, Math.max(0, (x - 0.55) / 0.45));
+    } else if (phase === GAME) {
+      const born = Math.min(1, (s - tSpawn) / 0.35);
+      holeR = HOLE_R * born * (1 + 0.5 * (1 - born)) * (1 + 0.12 * Math.sin(s * 2 * Math.PI / (STEP * 4)));
+      if (!calm) { flash = Math.exp(-(s - tCatch) * 6); seed = stars * 3.7; }   // a strike for every catch
+    } else {
+      // YOU WIN! comes back out of the hole, wherever it was caught, and settles in the centre.
+      const x = Math.min(1, (s - tWin) / 1.6);
+      fsA = fsStart * 1.3 * (1 + 0.04 * Math.sin(s * 2 * Math.PI / CYCLE)); wA = 1; win = 1;
+      suck = Math.pow(1 - x, 1.6);
+      holeR = HOLE_R * (1 - x);
+      if (!calm) { [flash, seed] = strike(s); flash = Math.max(flash * x, Math.exp(-(s - tCatch) * 6)); }
+    }
+
+    gl.uniform2f(uFs, fsA, fsB);
+    gl.uniform2f(uW, wA, wB);
+    gl.uniform1f(uSuck, Math.min(1, suck));
+    gl.uniform1f(uWin, win);
+    gl.uniform3f(uHole, hole.x * dpr, (innerHeight - hole.y) * dpr, holeR * dpr);
+    gl.uniform1f(uFlash, Math.min(1, flash));
+    gl.uniform1f(uSeed, seed);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    showHint(s);
     requestAnimationFrame(frame);
   }
+  function spawnHoleAtCentre(s) { hole.x = innerWidth / 2; hole.y = innerHeight / 2; hole.vx = hole.vy = 0; tSpawn = s - 0.35; }
 
   // ---- sound: a synthesised old-school break on the same clock as the picture ----
-  const hint = document.getElementById('hint');
-  let ac = null, drive, tone, master, noiseBuf, nextStep = 0;
+  let ac = null, drive, tone, master, fx, noiseBuf, nextStep = 0;
 
   function initAudio() {
     ac = new (window.AudioContext || window.webkitAudioContext)();
@@ -335,25 +487,26 @@
     limiter.threshold.value = -8; limiter.knee.value = 6; limiter.ratio.value = 14;
     limiter.attack.value = 0.002; limiter.release.value = 0.12;
     drive.connect(shaper).connect(tone).connect(master).connect(limiter).connect(ac.destination);
+    fx = ac.createGain(); fx.gain.value = 0.5;                 // game sounds skip the distortion
+    fx.connect(limiter);
 
-    ac.onstatechange = showHint;
     setInterval(schedule, 25);
   }
 
-  function burst(t, dur, level, filterType, freq, q) {     // a filtered noise hit
+  function burst(t, dur, level, filterType, freq, q, out) {     // a filtered noise hit
     const src = ac.createBufferSource(); src.buffer = noiseBuf;
     const f = ac.createBiquadFilter(); f.type = filterType; f.frequency.value = freq; f.Q.value = q || 0.7;
     const g = ac.createGain();
     g.gain.setValueAtTime(level, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    src.connect(f).connect(g).connect(drive);
-    src.start(t, Math.random() * 0.5, dur + 0.02);
+    src.connect(f).connect(g).connect(out || drive);
+    src.start(t, Math.random() * 0.25, dur + 0.02);
   }
-  function thump(t, dur, level, type, f0, f1, sweep) {     // a pitched hit with a falling tone
+  function thump(t, dur, level, type, f0, f1, sweep, out) {     // a pitched hit with a gliding tone
     const osc = ac.createOscillator(); osc.type = type;
     osc.frequency.setValueAtTime(f0, t); osc.frequency.exponentialRampToValueAtTime(f1, t + sweep);
     const g = ac.createGain();
     g.gain.setValueAtTime(level, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    osc.connect(g).connect(drive);
+    osc.connect(g).connect(out || drive);
     osc.start(t); osc.stop(t + dur + 0.02);
   }
   function play(n, t) {
@@ -369,32 +522,62 @@
     if (i % 2 === 0) burst(t, i % 4 === 0 ? 0.07 : 0.045, i % 4 === 0 ? 0.22 : 0.14, 'highpass', 7500);   // ride
     if (bar.crash === i || n % (TOTAL / STEP) === 0) burst(t, 0.7, 0.3, 'highpass', 4200);
   }
+  const live = () => ac && ac.state === 'running';
+  function whoosh() {                                  // the word going down the drain
+    if (!live()) return;
+    const t = ac.currentTime;
+    thump(t, SUCK, 0.5, 'sawtooth', 620, 32, SUCK, fx);
+    thump(t, SUCK, 0.4, 'sine', 1240, 40, SUCK * 0.9, fx);
+    burst(t, SUCK, 0.35, 'bandpass', 700, 2, fx);
+  }
+  function ding(n) {                                   // one star, each a step higher
+    if (!live()) return;
+    const t = ac.currentTime, f = [660, 784, 880, 1047, 1319][Math.min(4, n - 1)];
+    thump(t, 0.3, 0.6, 'sine', f, f, 0.01, fx);
+    thump(t + 0.08, 0.45, 0.6, 'sine', f * 1.5, f * 1.5, 0.01, fx);
+    burst(t, 0.2, 0.2, 'highpass', 6000, 0.7, fx);
+  }
+  function fanfare() {
+    if (!live()) return;
+    const t = ac.currentTime;
+    [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => thump(t + 0.35 + i * 0.09, 0.6, 0.5, 'triangle', f, f, 0.01, fx));
+    burst(t + 0.35, 1.4, 0.5, 'highpass', 3800, 0.7, fx);
+  }
   function schedule() {
-    if (ac.state !== 'running') return;
-    const nowV = performance.now() / 1000, at = ac.currentTime;
-    // Louder and dirtier as the word comes closer.
-    const u = (nowV % TOTAL) / TOTAL;
+    if (!live()) return;
+    const tl = clock(), at = ac.currentTime;
+    // Louder and dirtier as the word comes closer; in the game, with every star.
+    const u = phase === INTRO ? (tl % TOTAL) / TOTAL : phase === WIN ? 0.85 : 0.1 + 0.11 * stars;
     drive.gain.setTargetAtTime(0.22 + 5.5 * u * u, at, 0.05);
     tone.frequency.setTargetAtTime(5000 + 11000 * u, at, 0.05);
-    master.gain.setTargetAtTime(0.14 + 0.62 * u, at, 0.05);
+    master.gain.setTargetAtTime(phase === SUCKING ? 0 : 0.14 + 0.62 * u, at, 0.05);
 
-    const first = Math.ceil(nowV / STEP);
+    const first = Math.ceil(tl / STEP);
     if (nextStep < first) nextStep = first;
-    while (nextStep * STEP < nowV + 0.12) { play(nextStep, at + nextStep * STEP - nowV); nextStep++; }
+    while (nextStep * STEP < tl + 0.12) {
+      if (phase !== SUCKING) play(nextStep, at + nextStep * STEP - tl);   // the break drops out for the fall
+      nextStep++;
+    }
   }
-  function showHint() { hint.classList.toggle('off', !!ac && ac.state === 'running'); }
-  function toggleSound() {
-    if (!ac) initAudio();
-    if (ac.state === 'running') ac.suspend(); else ac.resume();
-  }
+
   // Browsers only let sound start after a click or key press, unless the site is allowed to autoplay.
   try { initAudio(); } catch (e) { ac = null; }
-  showHint();
-  addEventListener('pointerdown', toggleSound);
-  addEventListener('keydown', toggleSound);
+  function soundOn() { if (!ac) initAudio(); if (ac.state !== 'running') ac.resume(); }
+  function point(e) { mouse.x = e.clientX; mouse.y = e.clientY; mouse.seen = true; mouse.touch = e.pointerType === 'touch'; }
+  addEventListener('pointermove', point);
+  addEventListener('pointerdown', (e) => {
+    point(e);
+    soundOn();
+    if (phase === WIN && clock() > tWin + 2) restart();
+  });
+  addEventListener('keydown', (e) => {
+    if (e.key === 'm' || e.key === 'M') { if (live()) ac.suspend(); else soundOn(); }   // M mutes
+    else soundOn();
+  });
 
   addEventListener('resize', resize);
   resize();
+  showStars();
   requestAnimationFrame(frame);
 })();
 </script>
