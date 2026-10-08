@@ -3,21 +3,122 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HELLO</title>
+<title>HELLO / GOODBYE</title>
 <style>
-  html, body { height: 100%; margin: 0; }
-  body {
-    background: #000;
-    color: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: Helvetica, Arial, sans-serif;
-    font-size: clamp(48px, 12vw, 200px);
-    font-weight: 700;
-    letter-spacing: 0.05em;
-  }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; }
 </style>
 </head>
-<body>HELLO</body>
+<body>
+<canvas id="c" role="img" aria-label="HELLO turning into GOODBYE and back"></canvas>
+<script>
+(() => {
+  const WORDS = ['HELLO', 'GOODBYE'];
+  const CYCLE = 6000;          // ms: HELLO -> GOODBYE -> HELLO
+  const HOLD = 500;            // ms each word stays clean
+  const MORPH = (CYCLE - 2 * HOLD) / 2;
+  const ZONE = 0.12;           // width of the flickering front between the two words
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  let W = 0, H = 0, fs = 0, layers = [];
+
+  const fract = (x) => x - Math.floor(x);
+  const hash = (a, b) => fract(Math.sin(a * 127.1 + b * 311.7) * 43758.5453);
+  const smooth = (t) => t * t * (3 - 2 * t);
+  // 2D value noise, 0..1
+  function noise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = smooth(x - xi), yf = smooth(y - yi);
+    const a = hash(xi, yi), b = hash(xi + 1, yi);
+    const c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+    return a + (b - a) * xf + (c - a) * yf + (a - b - c + d) * xf * yf;
+  }
+
+  // Each word is pre-rendered three times (red, green, blue). Drawn on top of
+  // each other with additive blending they give white; offset, they split.
+  function build() {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    W = canvas.width = Math.round(innerWidth * dpr);
+    H = canvas.height = Math.round(innerHeight * dpr);
+    fs = Math.max(48, Math.min(innerWidth * 0.12, 200)) * dpr;
+    layers = WORDS.map((word) => ['#f00', '#0f0', '#00f'].map((color) => {
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const x = c.getContext('2d');
+      x.font = `700 ${fs}px Helvetica, Arial, sans-serif`;
+      if ('letterSpacing' in x) x.letterSpacing = `${fs * 0.05}px`;
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      x.fillStyle = color;
+      x.fillText(word, W / 2, H / 2);
+      return c;
+    }));
+  }
+
+  function frame(now) {
+    const t = now % CYCLE;
+    let p;
+    if (t < HOLD) p = 0;
+    else if (t < HOLD + MORPH) p = (t - HOLD) / MORPH;
+    else if (t < 2 * HOLD + MORPH) p = 1;
+    else p = 1 - (t - 2 * HOLD - MORPH) / MORPH;
+
+    const e = 0.5 - 0.5 * Math.cos(Math.PI * p);   // eased progress
+    const g = Math.sin(Math.PI * p);               // glitch strength, 0 at both words
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+
+    if (reduced) {
+      for (let w = 0; w < 2; w++) {
+        ctx.globalAlpha = w ? e : 1 - e;
+        for (const l of layers[w]) ctx.drawImage(l, 0, 0);
+      }
+      requestAnimationFrame(frame);
+      return;
+    }
+
+    const thr = -ZONE + e * (1 + 2 * ZONE);
+    const y0 = Math.round(H / 2 - fs * 0.7), y1 = Math.round(H / 2 + fs * 0.7);
+    const fast = Math.floor(now / 90), slow = Math.floor(now / 400);
+
+    for (let y = y0, i = 0; y < y1; i++) {
+      const h = Math.max(1, Math.round(1 + hash(i, slow) * fs * 0.09));
+      const yn = (y - y0) / fs;
+
+      // Which word this band shows: a slow drifting field, crossed by the threshold.
+      const field = 0.75 * noise(yn * 3 + 10, now * 0.00025) + 0.25 * hash(i, slow + 17);
+      const d = field - thr;
+      let w;
+      if (d < -ZONE) w = 1;
+      else if (d > ZONE) w = 0;
+      else w = hash(i + 7, fast) < (ZONE - d) / (2 * ZONE) ? 1 : 0;
+
+      const edge = Math.max(0, 1 - Math.abs(d) / (3 * ZONE));
+      let dx = 0.10 * (noise(yn * 2 + 50, now * 0.0006) - 0.5) * 2 * (0.3 + 0.7 * edge);
+      if (hash(i + 3, fast) > 0.93) dx += (hash(i + 5, fast) - 0.5) * 0.5 * edge;
+      dx *= g * fs;
+      const split = g * fs * 0.035 * (0.3 + edge) * noise(yn * 1.5 + 90, now * 0.0008);
+
+      const l = layers[w];
+      ctx.drawImage(l[0], 0, y, W, h, dx - split, y, W, h);
+      ctx.drawImage(l[1], 0, y, W, h, dx, y, W, h);
+      ctx.drawImage(l[2], 0, y, W, h, dx + split, y, W, h);
+      y += h;
+    }
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', build);
+  build();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
 </html>
