@@ -18,9 +18,11 @@ A small browser piece that turns into a game. No dependencies, no build step, no
 **The game**
 
 - After those three cycles the phrase is sucked down a hole, spiralling like a drain. A small white hole is left behind.
-- The pointer becomes a toothed trap that chomps like a mouth. The hole runs away from it; it is slower than a decisive hand and can be cornered, so it can always be caught.
+- The pointer becomes a toothed trap that chomps like a mouth. Every three seconds it grows a tail, ears or whiskers for a moment. The hole runs away from it; it is slower than a decisive hand and can be cornered, so it can always be caught.
 - When it slips away it mocks you in a comic bubble: `Ha-ha-ha!` or `are you a cat or no?`
-- Every catch earns a star and makes the hole a little quicker and the break a little dirtier. Five stars: `YOU WIN!` comes back out of the hole. Click to play again.
+- Every catch earns a star and a pleased meow with a purr (synthesised), makes the hole a little quicker and the break clearly louder and dirtier.
+- Cat ghosts drift up through the background.
+- Five stars: ten cats meow at once, `YOU WON!` comes back out of the hole and grows into `cats thank you`. Click to play again.
 - Add `?runs=3` to the address to let the phrase grow three times (36 s) before the hole.
 
 ## Structure
