@@ -20,7 +20,7 @@ A small browser piece that turns into a game. No dependencies, no build step, no
 - The pointer becomes a toothed trap that chomps like a mouth. Every three seconds it grows a tail, ears or whiskers for a moment. The hole runs away from it; it is slower than a decisive hand and can be cornered, so it can always be caught.
 - When it slips away it mocks you in a comic bubble: `Ha-ha-ha!` or `are you a cat or no?`
 - Every catch earns a star and a pleased meow with a purr (synthesised), makes the hole a little quicker and the break clearly louder and dirtier.
-- Cat ghosts drift up through the background.
+- Cat ghosts drift up through the background: whole cats seen from the side, with ears, whiskers, a swaying tail and four stepping paws.
 - Fail to catch the hole for 6 seconds and a giant cat-ghost silhouette looms up, strobing, with a cackle: `you are not a cat!!!!!!` (No strobe for visitors who ask their system for reduced motion.)
 - Five stars: ten cats meow at once, `YOU WON!` comes back out of the hole and grows into `cats thank you`. Click to play again.
 - Add `?runs=3` to the address to let the phrase grow three times (27 s) before the hole.

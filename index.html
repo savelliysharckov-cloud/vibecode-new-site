@@ -48,8 +48,15 @@
   .trap .acc { opacity: 0; transition: opacity 0.25s; }
   .trap .acc path { stroke-linecap: round; }
   .trap[data-acc="ears"] .ears, .trap[data-acc="whiskers"] .whiskers, .trap[data-acc="tail"] .tail { opacity: 1; }
-  .trap .tail { transform-origin: 0 25px; animation: wag 0.5s ease-in-out infinite alternate; }
-  @keyframes wag { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+  /* The tail: four thick joints, each swinging a beat behind the one before, so it whips from side to side. */
+  .trap .tail g { animation: wag 0.62s ease-in-out infinite alternate; }
+  .trap .t1 { transform-origin: 0 26px; } .trap .t1 > path { stroke-width: 9; }
+  .trap .t2 { transform-origin: 0 37px; animation-delay: -0.13s; } .trap .t2 > path { stroke-width: 8; }
+  .trap .t3 { transform-origin: 0 48px; animation-delay: -0.26s; } .trap .t3 > path { stroke-width: 7; }
+  .trap .t4 { transform-origin: 0 58px; animation-delay: -0.39s; } .trap .t4 > path { stroke-width: 6; }
+  @keyframes wag { from { transform: rotate(-24deg); } to { transform: rotate(24deg); } }
+  .trap .ears .outer { fill: #000; stroke-width: 2.4; }
+  .trap .ears .inner { fill: #b85c30; stroke: none; }
   .trap .up { animation: chomp-up 0.42s ease-in-out infinite alternate; }
   .trap .down { animation: chomp-down 0.42s ease-in-out infinite alternate; }
   @keyframes chomp-up { from { transform: translateY(-12px) rotate(-6deg); } to { transform: translateY(1px); } }
@@ -87,11 +94,14 @@
 <div class="bubble" id="bubble" aria-live="polite"><b></b></div>
 <div class="boo" id="boo" aria-live="polite"><b>you are not a cat!!!!!!</b></div>
 <div class="trap" id="trap" aria-hidden="true"><svg viewBox="-30 -30 60 60">
-  <g class="acc tail"><path d="M0,25 C2,36 16,34 15,45 S24,56 20,62"/></g>
   <g class="acc whiskers"><path d="M-24,0 L-40,-7 M-24,1 L-41,1 M-24,2 L-40,9 M24,0 L40,-7 M24,1 L41,1 M24,2 L40,9"/></g>
   <g class="up"><path d="M-22,-3 A22,22 0 0 1 22,-3 L17.6,-3 l-4.4,8 -4.4,-8 -4.4,8 -4.4,-8 -4.4,8 -4.4,-8 -4.4,8 -4.4,-8 Z"/>
-    <g class="acc ears"><path d="M-19,-14 L-22,-33 L-7,-24 Z M19,-14 L22,-33 L7,-24 Z"/></g></g>
-  <g class="down"><path d="M-22,3 A22,22 0 0 0 22,3 L13.2,3 l-4.4,-8 -4.4,8 -4.4,-8 -4.4,8 -4.4,-8 -4.4,8 Z"/></g>
+    <g class="acc ears">
+      <path class="outer" d="M-21,-10 C-26,-21 -26,-32 -22,-39 C-14,-35 -7,-29 -3,-22 Z M21,-10 C26,-21 26,-32 22,-39 C14,-35 7,-29 3,-22 Z"/>
+      <path class="inner" d="M-19,-16 C-22,-23 -22,-29 -20,-33 C-15,-30 -11,-26 -8,-22 Z M19,-16 C22,-23 22,-29 20,-33 C15,-30 11,-26 8,-22 Z"/>
+    </g></g>
+  <g class="down"><path d="M-22,3 A22,22 0 0 0 22,3 L13.2,3 l-4.4,-8 -4.4,8 -4.4,-8 -4.4,8 -4.4,-8 -4.4,8 Z"/>
+    <g class="acc tail"><g class="t1"><path d="M0,26 L0,37"/><g class="t2"><path d="M0,37 L0,48"/><g class="t3"><path d="M0,48 L0,58"/><g class="t4"><path d="M0,58 L0,67"/></g></g></g></g></g>
   <circle cx="-22" cy="0" r="2.6"/><circle cx="22" cy="0" r="2.6"/>
 </svg></div>
 <div class="stars off" id="stars" aria-label="Stars caught"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div>
@@ -204,7 +214,7 @@
   uniform vec2 uFs, uW;       // font size (px) and weight of the two overlapping zoom layers
   uniform vec3 uHole;         // the hole: centre (px) and radius (px, 0 = none)
   uniform vec2 uTail;         // where the tail is attached (em)
-  uniform vec4 uGhost[3];     // cat ghosts in the background: centre (px), size (px), strength
+  uniform vec4 uGhost[3];     // cat ghosts in the background: centre (px), size (px, signed), strength
   uniform vec4 uBoo;          // the giant one: centre (px), size (px), brightness
   uniform float uT, uE, uG, uCalm, uFlash, uSeed, uSuck, uWin;
   out vec4 o;
@@ -272,16 +282,54 @@
     return min(a, b) - h * h * k * 0.25;
   }
 
-  // A cat's ghost: round head, two ears, a body ending in a wavy hem, hollow eyes. Units of its size, y up.
+  float seg(vec2 p, vec2 a, vec2 b) {                // distance to a line segment
+    vec2 pa = p - a, ba = b - a;
+    return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0));
+  }
+  float tri(vec2 p, vec2 a, vec2 b, vec2 c) {        // signed distance to a triangle
+    vec2 e0 = b - a, e1 = c - b, e2 = a - c, v0 = p - a, v1 = p - b, v2 = p - c;
+    vec2 q0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+    vec2 q1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+    vec2 q2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+    float sg = sign(e0.x * e2.y - e0.y * e2.x);
+    vec2 d = min(min(vec2(dot(q0, q0), sg * (v0.x * e0.y - v0.y * e0.x)),
+                     vec2(dot(q1, q1), sg * (v1.x * e1.y - v1.y * e1.x))),
+                 vec2(dot(q2, q2), sg * (v2.x * e2.y - v2.y * e2.x)));
+    return -sqrt(d.x) * sign(d.y);
+  }
+
+  // A cat's ghost, seen from the side and facing right: body, haunch, head and muzzle, two ears,
+  // four stepping legs with paws, a raised tail that sways, whiskers, a hollow eye and inner ear.
+  // Units of its size, y up.
   float ghost(vec2 g, float t) {
-    g.x += 0.06 * sin(g.y * 5.0 + t * 2.0);
-    float head = length(g - vec2(0.0, 0.3)) - 0.42;
-    vec2 e = vec2(abs(abs(g.x) - 0.28), g.y - 0.6);
-    float ear = max(max((e.x - 0.19 * (0.4 - e.y) / 0.43) * 0.9, -e.y - 0.05), e.y - 0.4);
-    float hem = -0.78 + 0.07 * sin(g.x * 16.0 + t * 3.0);
-    float body = max(abs(g.x) - 0.42, max(g.y - 0.3, hem - g.y));
-    float eyes = length(vec2(abs(g.x) - 0.16, g.y - 0.34)) - 0.065;
-    return max(min(min(head, ear), body), -eyes);
+    if (abs(g.x) > 1.5 || abs(g.y) > 1.2) return 1.0;
+    g.y += 0.03 * sin(g.x * 4.0 + t * 2.0);                                   // it floats
+    float d = (length(g / vec2(0.52, 0.23)) - 1.0) * 0.23;                    // body
+    d = smin(d, length(g - vec2(-0.34, -0.06)) - 0.21, 0.08);                 // haunch
+    d = smin(d, length(g - vec2(0.56, 0.24)) - 0.21, 0.12);                   // head, with a neck
+    d = smin(d, length(g - vec2(0.74, 0.16)) - 0.075, 0.05);                  // muzzle
+    d = min(d, tri(g, vec2(0.44, 0.37), vec2(0.60, 0.41), vec2(0.49, 0.62)) - 0.012);   // ears
+    d = min(d, tri(g, vec2(0.59, 0.42), vec2(0.74, 0.34), vec2(0.71, 0.60)) - 0.012);
+    for (int i = 0; i < 4; i++) {                                             // legs and paws
+      float fi = float(i);
+      float x = i < 2 ? 0.30 + 0.13 * fi : -0.42 + 0.14 * (fi - 2.0);
+      vec2 foot = vec2(x + 0.07 * sin(t * 3.0 + fi * 1.9), -0.62);
+      d = min(d, seg(g, vec2(x, -0.08), foot) - 0.055);
+      d = min(d, length((g - foot - vec2(0.05, -0.01)) / vec2(1.0, 0.7)) - 0.065);
+    }
+    vec2 a = vec2(-0.48, 0.06);                                               // tail
+    float ang = 2.5 + 0.25 * sin(t * 2.2);
+    for (int i = 0; i < 6; i++) {
+      float f = float(i) / 5.0;
+      ang += -0.3 + 0.22 * f * sin(t * 2.2 - 0.6 - f * 2.0);
+      vec2 b = a + 0.14 * vec2(cos(ang), sin(ang));
+      d = min(d, seg(g, a, b) - mix(0.055, 0.035, f));
+      a = b;
+    }
+    vec2 m = vec2(0.77, 0.15);                                                // whiskers
+    d = min(d, min(min(seg(g, m, vec2(1.0, 0.25)), seg(g, m, vec2(1.02, 0.15))), seg(g, m, vec2(0.99, 0.05))) - 0.011);
+    d = max(d, -(length(g - vec2(0.63, 0.27)) - 0.035));                      // eye
+    return max(d, -tri(g, vec2(0.485, 0.41), vec2(0.565, 0.43), vec2(0.505, 0.54)));   // inner ear
   }
 
   vec4 shade(float fs) {
@@ -343,8 +391,9 @@
     }
     for (int i = 0; i < 3; i++) {
       if (uGhost[i].w <= 0.0) continue;
-      float gd = ghost((gl_FragCoord.xy - uGhost[i].xy) / uGhost[i].z, uT + float(i) * 2.0);
-      bg += vec3(0.62, 0.80, 0.72) * (smoothstep(0.04, -0.04, gd) * 0.2 + exp(-max(gd, 0.0) * 7.0) * 0.1) * uGhost[i].w;
+      vec2 gp = (gl_FragCoord.xy - uGhost[i].xy) / abs(uGhost[i].z);   // a negative size faces it left
+      float gd = ghost(vec2(gp.x * sign(uGhost[i].z), gp.y), uT + float(i) * 2.0);
+      bg += vec3(0.62, 0.80, 0.72) * (smoothstep(0.012, -0.012, gd) * 0.24 + exp(-max(gd, 0.0) * 9.0) * 0.08) * uGhost[i].w;
     }
     if (uBoo.w > 0.0)   // the giant silhouette, eyes cut out
       bg += vec3(1.0) * smoothstep(0.012, -0.012, ghost((gl_FragCoord.xy - uBoo.xy) / uBoo.z, uT)) * uBoo.w;
@@ -431,7 +480,7 @@
   const countEl = document.getElementById('count'), trap = document.getElementById('trap');
   const bubble = document.getElementById('bubble');
   let countShown = 0, tTaunt = 0, tBubble = -10, wasNear = false;
-  const ghosts = [0, 1, 2].map(() => ({ x: 0, y: 0, size: 0, born: -100, life: 1 }));
+  const ghosts = [0, 1, 2].map(() => ({ x: 0, y: 0, size: 0, flip: 1, born: -100, life: 1 }));
   const ghostData = new Float32Array(12);
   let tGhost = 0;
 
@@ -453,7 +502,7 @@
   function haunt(s, x, y) {
     const g = ghosts.find((gh) => s - gh.born > gh.life);
     if (!g) return;
-    g.size = 70 + Math.random() * 90;
+    g.size = 85 + Math.random() * 95; g.flip = Math.random() < 0.5 ? -1 : 1;
     g.x = x !== undefined ? x : g.size + Math.random() * Math.max(1, innerWidth - 2 * g.size);
     g.y = y !== undefined ? y : g.size + Math.random() * Math.max(1, innerHeight - 1.5 * g.size);
     g.born = s; g.life = 3.5 + Math.random() * 2;
@@ -465,7 +514,7 @@
       const age = s - g.born, alive = phase >= GAME && age < g.life;
       ghostData[i * 4] = (g.x + 18 * Math.sin(age * 1.3 + i)) * dpr;
       ghostData[i * 4 + 1] = (innerHeight - (g.y - 24 * age)) * dpr;
-      ghostData[i * 4 + 2] = g.size * dpr;
+      ghostData[i * 4 + 2] = g.size * dpr * g.flip;
       ghostData[i * 4 + 3] = alive ? Math.sin(Math.PI * age / g.life) : 0;
     });
     gl.uniform4fv(uGhost, ghostData);
@@ -593,7 +642,7 @@
       if (trap.dataset.acc !== acc) trap.dataset.acc = acc;
     }
     moveGhosts(s);
-    gl.uniform4f(uBoo, innerWidth / 2 * dpr, innerHeight * 0.47 * dpr, 0.5 * Math.min(innerHeight, innerWidth * 1.2) * dpr, booLevel(s));
+    gl.uniform4f(uBoo, innerWidth / 2 * dpr, innerHeight * 0.52 * dpr, Math.min(0.44 * innerWidth, 0.62 * innerHeight) * dpr, booLevel(s));
 
     // 3 on the first cycle, 2 on the second, 1 on the last — then down the hole.
     if (phase === INTRO) {
