@@ -2,7 +2,7 @@
 
 Live: https://savelliysharckov-cloud.github.io/vibecode-new-site/
 
-A placeholder page for now — white `HELLO` on black that grows organically into `GOODBYE` and back on a 6-second loop: a liquid, psychedelic morph between the two words' distance fields (WebGL2 shader, no dependencies). The actual project is coming.
+A placeholder page for now — white `HELLO` on black that grows organically into `GOODBYE` and back on a 6-second loop: a liquid, psychedelic morph between the two words' distance fields (WebGL2 shader, no dependencies). With every loop the word comes closer, until after six loops (36 s) it fills the whole screen; then the run restarts from normal size. The actual project is coming.
 
 ## Structure
 

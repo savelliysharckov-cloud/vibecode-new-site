@@ -30,9 +30,11 @@
   const CYCLE = 6;             // seconds: HELLO -> GOODBYE -> HELLO
   const HOLD = 0.5;            // seconds each word rests
   const MORPH = (CYCLE - 2 * HOLD) / 2;
+  const ZOOM_CYCLES = 6;       // word cycles it takes to grow from normal size to filling the screen
+  const FADE = 0.3;            // seconds of dip to black around the restart
 
   // Distance-field texture: both words drawn once, at a fixed size, independent of the screen.
-  const TW = 2048, TH = 640;
+  const TW = 3072, TH = 960;
 
   const canvas = document.getElementById('c');
   const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
@@ -108,7 +110,7 @@
   precision highp float;
   uniform sampler2D uField;
   uniform vec2 uRes, uTex;   // canvas size (px); texture size / em size
-  uniform float uFs, uT, uE, uG, uCalm;
+  uniform float uFs, uT, uE, uG, uCalm, uFade;
   out vec4 o;
 
   float hash(vec2 p) {
@@ -160,7 +162,7 @@
     float glow = exp(-max(d, 0.0) * 3.6) * uG * e.x * e.y * (1.0 - uCalm);
     vec3 aura = spectrum(d * 1.3 - uT * 0.2 + n * 0.9) * ring * glow * 0.85;
 
-    o = vec4(mix(aura, vec3(1.0), body), 1.0);
+    o = vec4(mix(aura, vec3(1.0), body) * uFade, 1.0);
   }`;
 
   function shader(type, src) {
@@ -190,18 +192,21 @@
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   const U = (name) => gl.getUniformLocation(prog, name);
-  const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG');
+  const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG'), uFade = U('uFade');
   gl.uniform1i(U('uField'), 0);
   gl.uniform1f(U('uCalm'), calm ? 1 : 0);
   gl.uniform2f(uTex, TW / EM, TH / EM);
 
+  let fsStart = 0, fsEnd = 0;   // font size in device px: where the zoom begins and where it ends
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(innerWidth * dpr);
     canvas.height = Math.round(innerHeight * dpr);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.uniform2f(uRes, canvas.width, canvas.height);
-    gl.uniform1f(uFs, Math.max(48, Math.min(innerWidth * 0.12, 200)) * dpr);
+    fsStart = Math.max(48, Math.min(innerWidth * 0.12, 200)) * dpr;
+    // Giant: letters taller than the screen, so the word spills past every edge.
+    fsEnd = Math.max(fsStart * 3, 1.5 * Math.min(innerHeight, innerWidth * 1.5) * dpr);
   }
 
   function frame(now) {
@@ -211,6 +216,11 @@
     else if (t < HOLD + MORPH) p = (t - HOLD) / MORPH;
     else if (t < 2 * HOLD + MORPH) p = 1;
     else p = 1 - (t - 2 * HOLD - MORPH) / MORPH;
+
+    // Every cycle the word comes closer; after ZOOM_CYCLES it fills the screen and the run restarts.
+    const total = CYCLE * ZOOM_CYCLES, z = s % total;
+    gl.uniform1f(uFs, calm ? fsStart : fsStart * Math.pow(fsEnd / fsStart, z / total));
+    gl.uniform1f(uFade, calm ? 1 : Math.min(1, z / FADE, (total - z) / FADE));
 
     gl.uniform1f(uT, s);
     gl.uniform1f(uE, p);                                   // progress; the shader eases it per region
