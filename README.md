@@ -2,7 +2,7 @@
 
 Live: https://savelliysharckov-cloud.github.io/vibecode-new-site/
 
-A placeholder page for now — white `HELLO` on black that glitch-morphs into `GOODBYE` and back on a 6-second loop (canvas, no dependencies). The actual project is coming.
+A placeholder page for now — white `HELLO` on black that grows organically into `GOODBYE` and back on a 6-second loop: a liquid, psychedelic morph between the two words' distance fields (WebGL2 shader, no dependencies). The actual project is coming.
 
 ## Structure
 
