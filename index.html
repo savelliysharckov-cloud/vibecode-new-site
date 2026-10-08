@@ -28,10 +28,9 @@
 (() => {
   const WORDS = ['HELLO', 'GOODBYE'];
   const CYCLE = 6;             // seconds: HELLO -> GOODBYE -> HELLO
-  const HOLD = 0.5;            // seconds each word rests
-  const MORPH = (CYCLE - 2 * HOLD) / 2;
-  const ZOOM_CYCLES = 6;       // word cycles it takes to grow from normal size to filling the screen
-  const FADE = 0.3;            // seconds of dip to black around the restart
+  const REST = 0.28;           // how much it keeps flowing even when a word is fully formed (0 = freezes)
+  const ZOOM_CYCLES = 4;       // word cycles it takes to grow from normal size to its largest
+  const OVERLAP = 3;           // seconds the outgoing giant word and the incoming small one share
 
   // Distance-field texture: both words drawn once, at a fixed size, independent of the screen.
   const TW = 3072, TH = 960;
@@ -110,7 +109,8 @@
   precision highp float;
   uniform sampler2D uField;
   uniform vec2 uRes, uTex;   // canvas size (px); texture size / em size
-  uniform float uFs, uT, uE, uG, uCalm, uFade;
+  uniform vec2 uFs, uW;       // font size (px) and weight of the two overlapping zoom layers
+  uniform float uT, uE, uG, uCalm;
   out vec4 o;
 
   float hash(vec2 p) {
@@ -131,8 +131,8 @@
   }
   vec3 spectrum(float h) { return 0.5 + 0.5 * cos(6.2832 * (h + vec3(0.0, 0.33, 0.67))); }
 
-  void main() {
-    vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / uFs;   // em units, origin at centre
+  vec3 shade(float fs) {
+    vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / fs;    // em units, origin at centre
     p.y = -p.y;
 
     // The surface breathes and flows: a swirl folded into itself, strongest mid-change.
@@ -156,13 +156,19 @@
     float aa = max(fwidth(d), 1e-4);
     float body = smoothstep(aa, -aa, d);
 
-    // Aura: soft spectral rings drifting off the shape, only while it is changing.
+    // Aura: soft spectral rings drifting off the shape, brightest mid-change.
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), uv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - uv);
     float ring = 0.5 + 0.5 * sin(d * 20.0 - uT * 3.0 + n * 5.0);
     float glow = exp(-max(d, 0.0) * 3.6) * uG * e.x * e.y * (1.0 - uCalm);
     vec3 aura = spectrum(d * 1.3 - uT * 0.2 + n * 0.9) * ring * glow * 0.85;
 
-    o = vec4(mix(aura, vec3(1.0), body) * uFade, 1.0);
+    return mix(aura, vec3(1.0), body);
+  }
+
+  void main() {
+    vec3 c = shade(uFs.x) * uW.x;
+    if (uW.y > 0.0) c += shade(uFs.y) * uW.y;   // the next run, already emerging in the distance
+    o = vec4(c, 1.0);
   }`;
 
   function shader(type, src) {
@@ -192,7 +198,7 @@
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   const U = (name) => gl.getUniformLocation(prog, name);
-  const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG'), uFade = U('uFade');
+  const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG'), uW = U('uW');
   gl.uniform1i(U('uField'), 0);
   gl.uniform1f(U('uCalm'), calm ? 1 : 0);
   gl.uniform2f(uTex, TW / EM, TH / EM);
@@ -205,26 +211,30 @@
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.uniform2f(uRes, canvas.width, canvas.height);
     fsStart = Math.max(48, Math.min(innerWidth * 0.12, 200)) * dpr;
-    // Giant: letters taller than the screen, so the word spills past every edge.
-    fsEnd = Math.max(fsStart * 3, 1.5 * Math.min(innerHeight, innerWidth * 1.5) * dpr);
+    // Largest: letters about half the screen tall, the word spilling past both sides.
+    fsEnd = Math.max(fsStart * 2.2, 0.7 * Math.min(innerHeight, innerWidth * 1.5) * dpr);
   }
 
   function frame(now) {
-    const s = now / 1000, t = s % CYCLE;
-    let p;
-    if (t < HOLD) p = 0;
-    else if (t < HOLD + MORPH) p = (t - HOLD) / MORPH;
-    else if (t < 2 * HOLD + MORPH) p = 1;
-    else p = 1 - (t - 2 * HOLD - MORPH) / MORPH;
+    const s = now / 1000;
+    // No holds: progress swings HELLO -> GOODBYE -> HELLO as one continuous wave.
+    const p = 0.5 - 0.5 * Math.cos(2 * Math.PI * s / CYCLE);
 
-    // Every cycle the word comes closer; after ZOOM_CYCLES it fills the screen and the run restarts.
-    const total = CYCLE * ZOOM_CYCLES, z = s % total;
-    gl.uniform1f(uFs, calm ? fsStart : fsStart * Math.pow(fsEnd / fsStart, z / total));
-    gl.uniform1f(uFade, calm ? 1 : Math.min(1, z / FADE, (total - z) / FADE));
+    // Endless approach: the word keeps coming closer; as it reaches its largest it dissolves
+    // while the next run is already growing out of the centre, so there is no cut.
+    const total = CYCLE * ZOOM_CYCLES, z = s % total, ratio = fsEnd / fsStart;
+    let fsB = 0, wB = 0;
+    if (!calm && z > total - OVERLAP) {
+      const x = (z - (total - OVERLAP)) / OVERLAP;
+      wB = x * x * (3 - 2 * x);
+      fsB = fsStart * Math.pow(ratio, (z - total) / total);
+    }
+    gl.uniform2f(uFs, calm ? fsStart : fsStart * Math.pow(ratio, z / total), fsB);
+    gl.uniform2f(uW, 1 - wB, wB);
 
     gl.uniform1f(uT, s);
-    gl.uniform1f(uE, p);                                   // progress; the shader eases it per region
-    gl.uniform1f(uG, Math.sin(Math.PI * p));               // how far from either word, 0 at rest
+    gl.uniform1f(uE, p);                                         // the shader eases it per region
+    gl.uniform1f(uG, REST + (1 - REST) * Math.sin(Math.PI * p)); // flow strength; never drops to zero
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
   }
