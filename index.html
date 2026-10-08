@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HELLO / GOODBYE</title>
 <style>
-  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; }
+  html, body { height: 100%; margin: 0; background: #000; overflow: hidden; cursor: pointer; }
   canvas { display: block; width: 100vw; height: 100vh; }
 
   /* Shown only if WebGL2 is unavailable: a plain crossfade on the same 6s loop. */
@@ -13,24 +13,45 @@
   .fallback span {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: #fff; font: 700 clamp(48px, 12vw, 200px) Helvetica, Arial, sans-serif; letter-spacing: 0.05em;
-    animation: swap 6s ease-in-out infinite;
+    animation: swap 3s ease-in-out infinite;
   }
-  .fallback span + span { animation-delay: -3s; }
+  .fallback span + span { animation-delay: -1.5s; }
   @keyframes swap { 0%, 8% { opacity: 1; } 50%, 58% { opacity: 0; } 100% { opacity: 1; } }
+  .hint {
+    position: fixed; left: 0; right: 0; bottom: 28px; text-align: center; pointer-events: none;
+    color: #9aa844; font: 600 12px Helvetica, Arial, sans-serif; letter-spacing: 0.3em; text-transform: uppercase;
+    transition: opacity 0.4s;
+  }
+  .hint.off { opacity: 0; }
+  .no-gl .hint { display: none; }
   .no-gl canvas { display: none; }
   .no-gl .fallback { display: block; }
 </style>
 </head>
 <body>
 <canvas id="c" role="img" aria-label="HELLO growing into GOODBYE and back"></canvas>
+<div class="hint off" id="hint">click for sound</div>
 <div class="fallback" aria-hidden="true"><span>HELLO</span><span>GOODBYE</span></div>
 <script>
 (() => {
   const WORDS = ['HELLO', 'GOODBYE'];
-  const CYCLE = 6;             // seconds: HELLO -> GOODBYE -> HELLO
+  const CYCLE = 3;             // seconds: HELLO -> GOODBYE -> HELLO (two bars of the break)
   const REST = 0.28;           // how much it keeps flowing even when a word is fully formed (0 = freezes)
-  const ZOOM_CYCLES = 4;       // word cycles it takes to grow from normal size to its largest
-  const OVERLAP = 3;           // seconds the outgoing giant word and the incoming small one share
+  const ZOOM_CYCLES = 8;       // word cycles it takes to grow from normal size to its largest
+  const OVERLAP = 1.5;         // seconds the outgoing giant word and the incoming small one share
+  const STORM_CYCLES = 2;      // lightning behind the letters during this many final cycles
+  const TOTAL = CYCLE * ZOOM_CYCLES;
+
+  // The break: 160 BPM, sixteen steps to a bar, four bars (A A B C) looping.
+  // x = hit, X = accented snare, o = ghost snare.
+  const STEP = CYCLE / 32;
+  const BARS = [
+    { k: 'x.x.......xx....', s: '....X..o.o..X..o' },
+    { k: 'x.x.......xx....', s: '....X..o.o..X..o' },
+    { k: 'x.x.......x.....', s: '....X..o.o....X.' },
+    { k: '..xx......x.....', s: '.o..X..o.o....X.', crash: 10 },
+  ];
+  const barOf = (n) => BARS[Math.floor(n / 16) % BARS.length];
 
   // Distance-field texture: both words drawn once, at a fixed size, independent of the screen.
   const TW = 3072, TH = 960;
@@ -110,7 +131,7 @@
   uniform sampler2D uField;
   uniform vec2 uRes, uTex;   // canvas size (px); texture size / em size
   uniform vec2 uFs, uW;       // font size (px) and weight of the two overlapping zoom layers
-  uniform float uT, uE, uG, uCalm;
+  uniform float uT, uE, uG, uCalm, uFlash, uSeed;
   out vec4 o;
 
   float hash(vec2 p) {
@@ -129,9 +150,28 @@
   vec2 flow(vec2 p, float t) {
     return vec2(soft(p + vec2(0.0, t)), soft(p + vec2(5.2, -t) + 1.7)) - 0.5;
   }
-  vec3 spectrum(float h) { return 0.5 + 0.5 * cos(6.2832 * (h + vec3(0.0, 0.33, 0.67))); }
+  // Colours lifted from the reference image: indigo, plum, brick, rust, olive-yellow, moss, teal.
+  const vec3 PAL[7] = vec3[7](
+    vec3(0.20, 0.125, 0.42), vec3(0.42, 0.12, 0.33), vec3(0.59, 0.19, 0.165), vec3(0.72, 0.36, 0.19),
+    vec3(0.60, 0.66, 0.27), vec3(0.185, 0.36, 0.23), vec3(0.14, 0.28, 0.30));
+  vec3 palette(float h) {
+    h = fract(h) * 7.0;
+    int i = int(floor(h));
+    return mix(PAL[i], PAL[(i + 1) % 7], smoothstep(0.0, 1.0, fract(h)));
+  }
 
-  vec3 shade(float fs) {
+  // One lightning bolt: a thin jagged line across the screen at a random angle, plus a faint halo.
+  float bolt(vec2 sp, float seed) {
+    float a = hash(vec2(seed, 1.3)) * 3.1416;
+    vec2 r = vec2(cos(a) * sp.x + sin(a) * sp.y, cos(a) * sp.y - sin(a) * sp.x);
+    float path = (hash(vec2(seed, 7.7)) - 0.5) * 0.9
+               + (noise(vec2(r.y * 3.0, seed)) - 0.5) * 0.30
+               + (noise(vec2(r.y * 13.0, seed + 9.0)) - 0.5) * 0.05;
+    float dd = abs(r.x - path);
+    return 0.0034 / (dd + 0.0034) + 0.05 * exp(-dd * 12.0);
+  }
+
+  vec4 shade(float fs) {
     vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / fs;    // em units, origin at centre
     p.y = -p.y;
 
@@ -156,19 +196,29 @@
     float aa = max(fwidth(d), 1e-4);
     float body = smoothstep(aa, -aa, d);
 
-    // Aura: soft spectral rings drifting off the shape, brightest mid-change.
+    // Aura: soft rings in the palette's colours drifting off the shape, brightest mid-change.
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), uv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - uv);
     float ring = 0.5 + 0.5 * sin(d * 20.0 - uT * 3.0 + n * 5.0);
     float glow = exp(-max(d, 0.0) * 3.6) * uG * e.x * e.y * (1.0 - uCalm);
-    vec3 aura = spectrum(d * 1.3 - uT * 0.2 + n * 0.9) * ring * glow * 0.85;
+    vec3 aura = palette(d * 0.9 - uT * 0.13 + n * 0.7) * ring * glow * 1.3;
 
-    return mix(aura, vec3(1.0), body);
+    return vec4(mix(aura, vec3(1.0), body), body);
   }
 
   void main() {
-    vec3 c = shade(uFs.x) * uW.x;
+    vec4 c = shade(uFs.x) * uW.x;
     if (uW.y > 0.0) c += shade(uFs.y) * uW.y;   // the next run, already emerging in the distance
-    o = vec4(c, 1.0);
+
+    // Lightning behind the letters: bolts and a dull glow in the cloud, hidden where a letter covers them.
+    vec3 bg = vec3(0.0);
+    if (uFlash > 0.0) {
+      vec2 sp = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+      float b = bolt(sp, uSeed) + 0.7 * bolt(sp, uSeed + 3.1) + 0.45 * bolt(sp, uSeed + 6.2);
+      float cloud = soft(sp * 1.6 + uSeed);
+      bg = (vec3(0.80, 0.86, 0.36) * min(b, 1.4) + vec3(0.62, 0.20, 0.13) * cloud * cloud * 1.2
+            + vec3(0.42, 0.12, 0.33) * 0.12) * uFlash;
+    }
+    o = vec4(c.rgb + bg * (1.0 - clamp(c.a, 0.0, 1.0)), 1.0);
   }`;
 
   function shader(type, src) {
@@ -199,6 +249,7 @@
 
   const U = (name) => gl.getUniformLocation(prog, name);
   const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG'), uW = U('uW');
+  const uFlash = U('uFlash'), uSeed = U('uSeed');
   gl.uniform1i(U('uField'), 0);
   gl.uniform1f(U('uCalm'), calm ? 1 : 0);
   gl.uniform2f(uTex, TW / EM, TH / EM);
@@ -222,7 +273,7 @@
 
     // Endless approach: the word keeps coming closer; as it reaches its largest it dissolves
     // while the next run is already growing out of the centre, so there is no cut.
-    const total = CYCLE * ZOOM_CYCLES, z = s % total, ratio = fsEnd / fsStart;
+    const total = TOTAL, z = s % total, ratio = fsEnd / fsStart;
     let fsB = 0, wB = 0;
     if (!calm && z > total - OVERLAP) {
       const x = (z - (total - OVERLAP)) / OVERLAP;
@@ -235,9 +286,112 @@
     gl.uniform1f(uT, s);
     gl.uniform1f(uE, p);                                         // the shader eases it per region
     gl.uniform1f(uG, REST + (1 - REST) * Math.sin(Math.PI * p)); // flow strength; never drops to zero
+
+    // Lightning in the last cycles, struck by the kicks and accented snares of the break.
+    let flash = 0, seed = 0;
+    const stormStart = total - STORM_CYCLES * CYCLE;
+    if (!calm && z > stormStart) {
+      const n = Math.floor(s / STEP);
+      for (let j = 0; j < 8; j++) {
+        const bar = barOf(n - j), i = (((n - j) % 16) + 16) % 16;
+        const w = bar.s[i] === 'X' ? 1 : bar.k[i] === 'x' ? 0.55 : 0;
+        if (!w) continue;
+        const dt = s - (n - j) * STEP;                 // a strike, then a weaker second flicker
+        flash = w * (Math.exp(-dt * 9) + (dt > 0.07 ? 0.6 * Math.exp(-(dt - 0.07) * 14) : 0));
+        seed = ((n - j) % 97) * 1.37;
+        break;
+      }
+      flash *= Math.min(1, (z - stormStart) / 1.5);
+    }
+    gl.uniform1f(uFlash, flash);
+    gl.uniform1f(uSeed, seed);
+
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     requestAnimationFrame(frame);
   }
+
+  // ---- sound: a synthesised old-school break on the same clock as the picture ----
+  const hint = document.getElementById('hint');
+  let ac = null, drive, tone, master, noiseBuf, nextStep = 0;
+
+  function initAudio() {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
+    const nd = noiseBuf.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+
+    // drums -> drive -> distortion -> tone -> volume -> limiter -> out
+    drive = ac.createGain();
+    const shaper = ac.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < curve.length; i++) {
+      const x = (i / (curve.length - 1)) * 2 - 1;
+      curve[i] = Math.tanh(4 * x) / Math.tanh(4);
+    }
+    shaper.curve = curve; shaper.oversample = '4x';
+    tone = ac.createBiquadFilter(); tone.type = 'lowpass';
+    master = ac.createGain(); master.gain.value = 0;
+    const limiter = ac.createDynamicsCompressor();
+    limiter.threshold.value = -8; limiter.knee.value = 6; limiter.ratio.value = 14;
+    limiter.attack.value = 0.002; limiter.release.value = 0.12;
+    drive.connect(shaper).connect(tone).connect(master).connect(limiter).connect(ac.destination);
+
+    ac.onstatechange = showHint;
+    setInterval(schedule, 25);
+  }
+
+  function burst(t, dur, level, filterType, freq, q) {     // a filtered noise hit
+    const src = ac.createBufferSource(); src.buffer = noiseBuf;
+    const f = ac.createBiquadFilter(); f.type = filterType; f.frequency.value = freq; f.Q.value = q || 0.7;
+    const g = ac.createGain();
+    g.gain.setValueAtTime(level, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(f).connect(g).connect(drive);
+    src.start(t, Math.random() * 0.5, dur + 0.02);
+  }
+  function thump(t, dur, level, type, f0, f1, sweep) {     // a pitched hit with a falling tone
+    const osc = ac.createOscillator(); osc.type = type;
+    osc.frequency.setValueAtTime(f0, t); osc.frequency.exponentialRampToValueAtTime(f1, t + sweep);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(level, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    osc.connect(g).connect(drive);
+    osc.start(t); osc.stop(t + dur + 0.02);
+  }
+  function play(n, t) {
+    const bar = barOf(n), i = n % 16;
+    if (bar.k[i] === 'x') { thump(t, 0.22, 1.0, 'sine', 165, 48, 0.09); burst(t, 0.015, 0.3, 'highpass', 2500); }
+    const sn = bar.s[i];
+    if (sn === 'X' || sn === 'o') {
+      const v = sn === 'X' ? 1 : 0.38;
+      burst(t, 0.15, 0.8 * v, 'bandpass', 1900, 0.6);
+      burst(t, 0.09, 0.35 * v, 'highpass', 5000);
+      thump(t, 0.09, 0.45 * v, 'triangle', 235, 170, 0.05);
+    }
+    if (i % 2 === 0) burst(t, i % 4 === 0 ? 0.07 : 0.045, i % 4 === 0 ? 0.22 : 0.14, 'highpass', 7500);   // ride
+    if (bar.crash === i || n % (TOTAL / STEP) === 0) burst(t, 0.7, 0.3, 'highpass', 4200);
+  }
+  function schedule() {
+    if (ac.state !== 'running') return;
+    const nowV = performance.now() / 1000, at = ac.currentTime;
+    // Louder and dirtier as the word comes closer.
+    const u = (nowV % TOTAL) / TOTAL;
+    drive.gain.setTargetAtTime(0.22 + 5.5 * u * u, at, 0.05);
+    tone.frequency.setTargetAtTime(5000 + 11000 * u, at, 0.05);
+    master.gain.setTargetAtTime(0.14 + 0.62 * u, at, 0.05);
+
+    const first = Math.ceil(nowV / STEP);
+    if (nextStep < first) nextStep = first;
+    while (nextStep * STEP < nowV + 0.12) { play(nextStep, at + nextStep * STEP - nowV); nextStep++; }
+  }
+  function showHint() { hint.classList.toggle('off', !!ac && ac.state === 'running'); }
+  function toggleSound() {
+    if (!ac) initAudio();
+    if (ac.state === 'running') ac.suspend(); else ac.resume();
+  }
+  // Browsers only let sound start after a click or key press, unless the site is allowed to autoplay.
+  try { initAudio(); } catch (e) { ac = null; }
+  showHint();
+  addEventListener('pointerdown', toggleSound);
+  addEventListener('keydown', toggleSound);
 
   addEventListener('resize', resize);
   resize();
