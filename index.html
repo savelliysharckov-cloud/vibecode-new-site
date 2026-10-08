@@ -47,7 +47,7 @@
   const WORDS = ['HELLO', 'GOODBYE', 'YOU WIN!'];
   const CYCLE = 3;             // seconds: HELLO -> GOODBYE -> HELLO (two bars of the break)
   const REST = 0.28;           // how much it keeps flowing even when a word is fully formed (0 = freezes)
-  const ZOOM_CYCLES = 8;       // word cycles it takes to grow from normal size to its largest
+  const ZOOM_CYCLES = 3;       // word cycles it takes to grow from normal size to its largest
   const OVERLAP = 1.5;         // seconds the outgoing giant word and the incoming small one share
   const STORM_CYCLES = 2;      // lightning behind the letters during this many final cycles
   const TOTAL = CYCLE * ZOOM_CYCLES;
@@ -297,11 +297,11 @@
   }
 
   // ---- the game ----
-  // The word grows RUNS times, then goes down a hole. Chase the hole; five catches win.
-  // Add ?runs=1 to the address to reach the game sooner.
+  // The word grows for three cycles, then goes down a hole. Chase the hole; five catches win.
+  // Add ?runs=3 to the address to let it grow that many times before the hole.
   const RUNS = (() => {
     const n = parseInt(new URLSearchParams(location.search).get('runs'), 10);
-    return n >= 0 && n <= 20 ? n : 3;
+    return n >= 0 && n <= 20 ? n : 1;
   })();
   const T_SUCK = RUNS * TOTAL;   // when the word starts going down the hole
   const SUCK = 1.8;              // seconds that takes
