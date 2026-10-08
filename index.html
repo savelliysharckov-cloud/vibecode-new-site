@@ -14,9 +14,9 @@
   .fallback span {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: #fff; font: 700 clamp(28px, 7vw, 120px) Helvetica, Arial, sans-serif; letter-spacing: 0.05em; text-align: center;
-    animation: swap 4s ease-in-out infinite;
+    animation: swap 3s ease-in-out infinite;
   }
-  .fallback span + span { animation-delay: -2s; }
+  .fallback span + span { animation-delay: -1.5s; }
   @keyframes swap { 0%, 8% { opacity: 1; } 50%, 58% { opacity: 0; } 100% { opacity: 1; } }
   .hint {
     position: fixed; left: 0; right: 0; bottom: 28px; text-align: center; pointer-events: none;
@@ -36,7 +36,7 @@
     color: #c2d04a; font: 700 64px/1 Helvetica, Arial, sans-serif; text-shadow: 0 0 18px #b85c30;
   }
   .count.off { display: none; }
-  .count span { display: inline-block; animation: tick 4s ease-out both; }
+  .count span { display: inline-block; animation: tick 3s ease-out both; }
   @keyframes tick { 0% { transform: scale(2.2); opacity: 0; } 7% { transform: scale(1); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.7; } }
 
   /* The pointer in the game: a toothed trap that chomps like a mouth. */
@@ -64,7 +64,18 @@
     transform: scale(0) rotate(-5deg); transform-origin: 10% 110%; transition: transform 0.16s cubic-bezier(.3, 1.7, .5, 1);
   }
   .bubble.show b { transform: scale(1) rotate(-5deg); }
-  .no-gl .stars, .no-gl .count, .no-gl .trap, .no-gl .bubble { display: none; }
+  /* What the giant ghost says when you fail to catch the hole for too long. */
+  .boo { position: fixed; left: 0; right: 0; bottom: 13%; text-align: center; pointer-events: none; display: none; }
+  .boo.show { display: block; }
+  .boo b {
+    display: inline-block; padding: 0.35em 0.8em 0.4em; background: #fff; color: #000;
+    border: 4px solid #000; border-radius: 1em; box-shadow: 6px 6px 0 #b85c30;
+    font: italic 700 clamp(20px, 4.6vw, 60px) "Comic Sans MS", "Chalkboard SE", "Marker Felt", cursive;
+    animation: shake 0.09s linear infinite alternate;
+  }
+  @keyframes shake { from { transform: rotate(-4deg) translate(-3px, 2px); } to { transform: rotate(-2deg) translate(3px, -2px); } }
+  @media (prefers-reduced-motion: reduce) { .boo b { animation: none; transform: rotate(-3deg); } }
+  .no-gl .stars, .no-gl .count, .no-gl .trap, .no-gl .bubble, .no-gl .boo { display: none; }
   .no-gl .hint { display: none; }
   .no-gl canvas { display: none; }
   .no-gl .fallback { display: block; }
@@ -74,6 +85,7 @@
 <canvas id="c" role="img" aria-label="Hello, cat growing into catch me if you can! and back"></canvas>
 <div class="count off" id="count" aria-hidden="true"></div>
 <div class="bubble" id="bubble" aria-live="polite"><b></b></div>
+<div class="boo" id="boo" aria-live="polite"><b>you are not a cat!!!!!!</b></div>
 <div class="trap" id="trap" aria-hidden="true"><svg viewBox="-30 -30 60 60">
   <g class="acc tail"><path d="M0,25 C2,36 16,34 15,45 S24,56 20,62"/></g>
   <g class="acc whiskers"><path d="M-24,0 L-40,-7 M-24,1 L-41,1 M-24,2 L-40,9 M24,0 L40,-7 M24,1 L41,1 M24,2 L40,9"/></g>
@@ -88,14 +100,14 @@
 <script>
 (() => {
   const WORDS = [['Hello, cat'], ['catch me', 'if you can!'], ['YOU WON!'], ['cats', 'thank you']];   // each a list of lines
-  const CYCLE = 4;             // seconds: first phrase -> second -> first
+  const CYCLE = 3;             // seconds: first phrase -> second -> first
   const REST = 0.28;           // how much it keeps flowing even when a word is fully formed (0 = freezes)
   const ZOOM_CYCLES = 3;       // word cycles it takes to grow from normal size to its largest
   const OVERLAP = 1.5;         // seconds the outgoing giant word and the incoming small one share
   const STORM_CYCLES = 2;      // lightning behind the letters during this many final cycles
   const TOTAL = CYCLE * ZOOM_CYCLES;
 
-  // The break: 160 BPM, sixteen steps to a bar, four bars (A A B C) looping. Three cycles = eight bars.
+  // The break: 160 BPM, sixteen steps to a bar, four bars (A A B C) looping. Three cycles = six bars.
   // x = hit, X = accented snare, o = ghost snare.
   const STEP = 60 / 160 / 4;
   const BARS = [
@@ -157,11 +169,12 @@
   // Pick the texture font size so the widest line and the tallest phrase both fit with room to spare.
   sx.font = fontOf(100); spaced(100);
   const widthEm = (line) => sx.measureText(line).width / 100;
+  const WIDEST = Math.max(...WORDS.flat().map(widthEm));   // the widest line of any phrase, in em
   const EM = Math.floor(Math.min(
-    TW * 0.62 / Math.max(...WORDS.flat().map(widthEm)),
+    TW * 0.62 / WIDEST,
     TH * 0.5 / Math.max(...WORDS.map((lines) => lines.length))));
   // Where the cat's tail grows from: the foot of the last letter of the first phrase (em units from centre).
-  const TAIL = [widthEm(WORDS[0][0]) / 2 + 0.02, 0.2];
+  const TAIL = [widthEm(WORDS[0][0]) / 2 + 0.1, 0.24];
 
   const field = new Float32Array(TW * TH * 4);   // R, G, B, A = the four phrases, distances in em units
   WORDS.forEach((lines, ch) => {
@@ -192,6 +205,7 @@
   uniform vec3 uHole;         // the hole: centre (px) and radius (px, 0 = none)
   uniform vec2 uTail;         // where the tail is attached (em)
   uniform vec4 uGhost[3];     // cat ghosts in the background: centre (px), size (px), strength
+  uniform vec4 uBoo;          // the giant one: centre (px), size (px), brightness
   uniform float uT, uE, uG, uCalm, uFlash, uSeed, uSuck, uWin;
   out vec4 o;
 
@@ -232,22 +246,23 @@
     return 0.0034 / (dd + 0.0034) + 0.05 * exp(-dd * 12.0);
   }
 
-  // The cat's tail: long enough to cross the page. It leaves the last letter sideways, rises,
-  // and sways slowly from the base while the bend travels up to the tip, which flicks on its own.
+  // The cat's tail: it rises from the last letter and arches back over the whole phrase, so it
+  // stays inside the page. It sways slowly from the base; the bend travels to the tip, which flicks.
   float tail(vec2 q) {
     const int N = 14;
     float w = uT * 3.14159;                          // one full sway every two seconds
-    float ang = -0.35 + 0.22 * sin(w), d = 1e3;
+    float shape = -1.0, d = 1e3;
     vec2 a = uTail;
     for (int i = 0; i < N; i++) {
       float f = float(i) / float(N - 1);
-      ang += -0.32 * exp(-4.0 * f)                   // the rise
-           + 0.13 * sin(w - 0.5 - f * 3.2)           // the sway, arriving later further along
-           + 0.10 * f * f * sin(2.0 * w - f * 5.0);  // the tip
-      vec2 b = a + 0.3 * vec2(cos(ang), sin(ang));
+      shape += -0.42 * exp(-3.0 * f) - 0.02;         // the arch
+      float ang = shape + 0.2 * sin(w)               // the whole tail swaying from its base
+                + 0.2 * f * sin(w - 0.6 - 2.5 * f)   // the bend arriving later further along
+                + 0.08 * f * f * sin(2.0 * w - 4.0 * f);   // the tip
+      vec2 b = a + 0.24 * vec2(cos(ang), sin(ang));
       vec2 pa = q - a, ba = b - a;
       float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
-      d = min(d, length(pa - ba * h) - mix(0.15, 0.10, (float(i) + h) / float(N)));
+      d = min(d, length(pa - ba * h) - mix(0.105, 0.075, (float(i) + h) / float(N)));
       a = b;
     }
     return d;
@@ -288,7 +303,7 @@
 
     vec2 uv = 0.5 + q / uTex;
     vec4 d3 = texture(uField, uv);
-    d3.x = smin(d3.x, tail(q), 0.1);                 // the first phrase wears the tail
+    d3.x = smin(d3.x, tail(q), 0.05);                // the first phrase wears the tail
 
     // Each region ripens at its own moment, so one word grows out of the other in patches.
     float n = soft(p * 1.1 + w1 * 1.5 + uT * 0.05);
@@ -300,24 +315,16 @@
     d -= uG * 0.05;                                              // keep its body while in between
     d += uG * 0.10 * (soft(q * 2.2 + uT * 0.3) - 0.5) * (1.0 - uCalm);   // buds and hollows
 
-    // Fur: fine strands combed along a slowly turning direction. They roughen the outline
-    // and shade the body; broad ginger stripes run across them, like a tabby.
-    float ds = d, aa = max(fwidth(d), 1e-4);
-    float th = 1.25 + 1.6 * (soft(q * 0.7 + 3.0) - 0.5);
-    vec2 fq = vec2(cos(th) * q.x + sin(th) * q.y, cos(th) * q.y - sin(th) * q.x);
-    float strand = 0.65 * noise(vec2(fq.x * 5.0, fq.y * 70.0)) + 0.35 * noise(vec2(fq.x * 9.0 + 4.0, fq.y * 150.0));
-    d += (strand - 0.5) * 0.045;
+    float aa = max(fwidth(d), 1e-4);
     float body = smoothstep(aa, -aa, d);
-    float stripe = smoothstep(0.42, 0.7, soft(vec2(fq.x * 1.3, fq.y * 4.0) + 7.0));
-    vec3 fur = mix(vec3(1.0, 0.97, 0.92), vec3(0.86, 0.52, 0.27), 0.5 * stripe) * (0.58 + 0.42 * strand);
 
     // Aura: a faint, close ring in the palette's colours, brightest mid-change.
     vec2 e = smoothstep(vec2(0.0), vec2(0.08), uv) * smoothstep(vec2(0.0), vec2(0.08), 1.0 - uv);
-    float ring = 0.5 + 0.5 * sin(ds * 20.0 - uT * 3.0 + n * 5.0);
-    float glow = exp(-max(ds, 0.0) * 7.0) * uG * e.x * e.y * (1.0 - uCalm);
-    vec3 aura = palette(ds * 0.9 - uT * 0.13 + n * 0.7) * ring * glow * 0.5;
+    float ring = 0.5 + 0.5 * sin(d * 20.0 - uT * 3.0 + n * 5.0);
+    float glow = exp(-max(d, 0.0) * 7.0) * uG * e.x * e.y * (1.0 - uCalm);
+    vec3 aura = palette(d * 0.9 - uT * 0.13 + n * 0.7) * ring * glow * 0.5;
 
-    return vec4(mix(aura, fur, body), body);
+    return vec4(mix(aura, vec3(1.0), body), body);
   }
 
   void main() {
@@ -339,6 +346,8 @@
       float gd = ghost((gl_FragCoord.xy - uGhost[i].xy) / uGhost[i].z, uT + float(i) * 2.0);
       bg += vec3(0.62, 0.80, 0.72) * (smoothstep(0.04, -0.04, gd) * 0.2 + exp(-max(gd, 0.0) * 7.0) * 0.1) * uGhost[i].w;
     }
+    if (uBoo.w > 0.0)   // the giant silhouette, eyes cut out
+      bg += vec3(1.0) * smoothstep(0.012, -0.012, ghost((gl_FragCoord.xy - uBoo.xy) / uBoo.z, uT)) * uBoo.w;
     vec3 col = c.rgb + bg * (1.0 - clamp(c.a, 0.0, 1.0));
 
     // The hole the word went down: a small white disc with a spiral halo.
@@ -383,7 +392,7 @@
   const uRes = U('uRes'), uTex = U('uTex'), uFs = U('uFs'), uT = U('uT'), uE = U('uE'), uG = U('uG'), uW = U('uW');
   const uFlash = U('uFlash'), uSeed = U('uSeed'), uHole = U('uHole'), uSuck = U('uSuck'), uWin = U('uWin');
   gl.uniform2f(U('uTail'), TAIL[0], TAIL[1]);
-  const uGhost = U('uGhost');
+  const uGhost = U('uGhost'), uBoo = U('uBoo');
   gl.uniform1i(U('uField'), 0);
   gl.uniform1f(U('uCalm'), calm ? 1 : 0);
   gl.uniform2f(uTex, TW / EM, TH / EM);
@@ -395,9 +404,9 @@
     canvas.height = Math.round(innerHeight * dpr);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.uniform2f(uRes, canvas.width, canvas.height);
-    fsStart = Math.max(48, Math.min(innerWidth * 0.12, 200)) * dpr;
-    // Largest: letters about half the screen tall, the word spilling past both sides.
-    fsEnd = Math.max(fsStart * 2.2, 0.7 * Math.min(innerHeight, innerWidth * 1.5) * dpr);
+    // Largest: the widest two-line phrase still sits wholly inside the page. It starts at 40% of that.
+    fsEnd = Math.min(0.9 * innerWidth / WIDEST, 0.78 * innerHeight / 2.3) * dpr;
+    fsStart = fsEnd * 0.4;
   }
 
   // ---- the game ----
@@ -425,6 +434,20 @@
   const ghosts = [0, 1, 2].map(() => ({ x: 0, y: 0, size: 0, born: -100, life: 1 }));
   const ghostData = new Float32Array(12);
   let tGhost = 0;
+
+  // Fail to catch it for IDLE seconds and a giant cat ghost looms up, strobing, to tell you what you are not.
+  const IDLE = 6, BOO = 1.9, booEl = document.getElementById('boo');
+  let tBoo = -100, tIdle = 0;
+  function boo(s) {
+    tBoo = s; tIdle = s + BOO; tTaunt = s + BOO - 1;
+    booEl.classList.add('show'); bubble.classList.remove('show'); tBubble = -10;
+    evilLaugh();
+  }
+  function booLevel(s) {                               // brightness of the silhouette right now
+    const b = s - tBoo;
+    if (phase !== GAME || b < 0 || b >= BOO) { booEl.classList.remove('show'); return 0; }
+    return calm ? 0.5 : Math.floor(b * 18) % 2 ? 0 : 1;   // nine flashes a second
+  }
 
   // Cat ghosts drift up through the background during the game and after it.
   function haunt(s, x, y) {
@@ -485,7 +508,7 @@
       hole.y = 90 + Math.random() * Math.max(1, H - 180);
       if (!mouse.seen || Math.hypot(hole.x - mouse.x, hole.y - mouse.y) > Math.min(W, H) * 0.45) break;
     }
-    hole.vx = hole.vy = 0; tSpawn = s; tTaunt = s - 1.6; wasNear = false;
+    hole.vx = hole.vy = 0; tSpawn = tIdle = s; tTaunt = s - 1.6; wasNear = false; tBoo = -100;
   }
   function caught(s) {
     stars++; tCatch = s; showStars(); happyCat(stars); haunt(s, hole.x, hole.y); bubble.classList.remove('show'); tBubble = -10;
@@ -518,6 +541,8 @@
 
     const now = Math.hypot(hole.x - mouse.x, hole.y - mouse.y);
     if (mouse.seen && s - tSpawn > 0.9 && now < (mouse.touch ? 42 : 26)) { caught(s); return; }
+
+    if (s - tIdle > IDLE) { boo(s); return; }
 
     // Got close and it slipped away: it laughs. Left alone for a while: it asks.
     if (mouse.seen && now < 140) wasNear = true;
@@ -568,6 +593,7 @@
       if (trap.dataset.acc !== acc) trap.dataset.acc = acc;
     }
     moveGhosts(s);
+    gl.uniform4f(uBoo, innerWidth / 2 * dpr, innerHeight * 0.47 * dpr, 0.5 * Math.min(innerHeight, innerWidth * 1.2) * dpr, booLevel(s));
 
     // 3 on the first cycle, 2 on the second, 1 on the last — then down the hole.
     if (phase === INTRO) {
@@ -612,7 +638,7 @@
       // YOU WON! comes back out of the hole, wherever it was caught, settles in the centre,
       // and then grows into: cats thank you.
       const x = Math.min(1, (s - tWin) / 1.6);
-      fsA = fsStart * 1.3 * (1 + 0.04 * Math.sin(s * 2 * Math.PI / CYCLE)); wA = 1; win = 1 + Math.min(1, Math.max(0, (s - tWin - 3.2) / 1.6));
+      fsA = fsEnd * 0.92 * (1 + 0.03 * Math.sin(s * 2 * Math.PI / CYCLE)); wA = 1; win = 1 + Math.min(1, Math.max(0, (s - tWin - 3.2) / 1.6));
       suck = Math.pow(1 - x, 1.6);
       holeR = HOLE_R * (1 - x);
       if (!calm) { [flash, seed] = strike(s); flash = Math.max(flash * x, Math.exp(-(s - tCatch) * 6)); }
@@ -630,7 +656,7 @@
     showHint(s);
     requestAnimationFrame(frame);
   }
-  function spawnHoleAtCentre(s) { hole.x = innerWidth / 2; hole.y = innerHeight / 2; hole.vx = hole.vy = 0; tSpawn = s - 0.35; tTaunt = s - 1.6; wasNear = false; }
+  function spawnHoleAtCentre(s) { hole.x = innerWidth / 2; hole.y = innerHeight / 2; hole.vx = hole.vy = 0; tSpawn = s - 0.35; tIdle = s; tTaunt = s - 1.6; wasNear = false; tBoo = -100; }
 
   // ---- sound: a synthesised old-school break on the same clock as the picture ----
   let ac = null, drive, tone, master, fx, noiseBuf, nextStep = 0;
@@ -745,6 +771,15 @@
     const t = ac.currentTime;
     meow(t, 560 + 30 * n, 0.6, 0.9);
     purr(t + 0.5, 1.0);
+  }
+  function evilLaugh() {                               // a long descending cackle
+    if (!live()) return;
+    const t = ac.currentTime;
+    for (let i = 0; i < 10; i++) {
+      const f = 560 * Math.pow(0.93, i);
+      thump(t + i * 0.14, 0.12, 0.4, 'sawtooth', f * 1.2, f * 0.78, 0.11, fx);
+      thump(t + i * 0.14, 0.12, 0.3, 'square', f * 0.6, f * 0.39, 0.11, fx);
+    }
   }
   function choir() {                                   // the end: ten different cats at once
     if (!live()) return;

@@ -6,11 +6,10 @@ A small browser piece that turns into a game. No dependencies, no build step, no
 
 **The piece**
 
-- White `Hello, cat` on black grows organically into `catch me if you can!` and back, one cycle every 4 seconds: a liquid morph between the phrases' distance fields (WebGL2 shader). The motion never rests.
-- `Hello, cat` has a long tail growing from its last letter, reaching up the page and swaying from side to side.
-- The letters and the tail are furred: fine strands, a rough outline, faint ginger tabby stripes.
+- White `Hello, cat` on black grows organically into `catch me if you can!` and back, one cycle every 3 seconds: a liquid morph between the phrases' distance fields (WebGL2 shader). The motion never rests.
+- `Hello, cat` has a long tail growing from its last letter, arching back over the whole phrase and swaying.
 - A counter at the top shows 3 on the first cycle, 2 on the second, 1 on the last.
-- With every cycle the phrase comes closer. After three cycles (12 s, eight bars) it spills past the screen edges.
+- With every cycle the phrase comes closer, but it always stays wholly inside the page: it starts at 40% and ends as large as the page allows (9 s, six bars).
 - During the last two cycles lightning strikes behind the letters, on the kicks and accented snares.
 - An old-school drum & bass break (160 BPM, synthesised in Web Audio) plays on the same clock and gets louder and more distorted as the phrase grows. Browsers need one click or key press before sound can start; `M` mutes.
 - Colours are taken from a reference image: indigo, plum, brick, rust, olive-yellow, moss, teal.
@@ -22,8 +21,9 @@ A small browser piece that turns into a game. No dependencies, no build step, no
 - When it slips away it mocks you in a comic bubble: `Ha-ha-ha!` or `are you a cat or no?`
 - Every catch earns a star and a pleased meow with a purr (synthesised), makes the hole a little quicker and the break clearly louder and dirtier.
 - Cat ghosts drift up through the background.
+- Fail to catch the hole for 6 seconds and a giant cat-ghost silhouette looms up, strobing, with a cackle: `you are not a cat!!!!!!` (No strobe for visitors who ask their system for reduced motion.)
 - Five stars: ten cats meow at once, `YOU WON!` comes back out of the hole and grows into `cats thank you`. Click to play again.
-- Add `?runs=3` to the address to let the phrase grow three times (36 s) before the hole.
+- Add `?runs=3` to the address to let the phrase grow three times (27 s) before the hole.
 
 ## Structure
 
